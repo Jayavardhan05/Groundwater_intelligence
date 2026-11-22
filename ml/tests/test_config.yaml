@@ -1,0 +1,63 @@
+# Groundwater level forecasting - shared + model-specific configuration
+# Paths are relative to the repository root.
+
+data:
+  processed_path: data/processed/groundwater_levels.parquet   # .parquet or .csv
+  well_col: well_id
+  time_col: timestamp
+  target_col: gw_level            # depth-to-water (m bgl) OR water level elevation (m amsl)
+  feature_cols:                   # dynamic covariates produced by data_pipeline/
+    - rainfall
+    - temperature
+    - evapotranspiration
+    - recharge
+    - pumping
+  freq: MS                        # pandas offset alias: MS = monthly, D = daily
+  max_interp_gap: 2               # fill at most N consecutive missing steps (0 = never interpolate)
+  min_rows_per_well: 60           # wells with fewer regular steps are dropped
+
+sequence:
+  lookback: 12                    # LSTM input window length (steps)
+  horizon: 1                      # steps ahead the target is predicted from the last observed step
+  include_target_as_input: true   # feed past groundwater levels as an input channel
+
+tabular:                          # lagged feature matrix for RF / XGBoost
+  target_lags: [0, 1, 2, 3, 6, 12]       # lag 0 = last observed level at the forecast origin
+  feature_lags: [1, 3]                   # extra lags of each covariate (current value always included)
+  rolling_windows: [3, 6]                # rolling mean of the target ending at the origin
+  seasonal_features: true                # sin/cos of the *target* month (known in advance)
+
+split:
+  strategy: temporal              # temporal: per-well chronological split | well: hold out whole wells
+  train_frac: 0.70
+  val_frac: 0.15                  # remainder is test
+  seed: 42                        # used only by strategy=well
+
+scaling:
+  scale_target: true              # target scaled with train statistics; inverse_transform_target() reverses it
+
+models:
+  lstm:
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.2
+    learning_rate: 0.001
+    batch_size: 64
+    epochs: 100
+    patience: 10
+  rf:
+    n_estimators: 300
+    max_depth: null
+    min_samples_leaf: 2
+    n_jobs: -1
+    random_state: 42
+  xgb:
+    n_estimators: 1000
+    learning_rate: 0.05
+    max_depth: 6
+    subsample: 0.8
+    colsample_bytree: 0.8
+    early_stopping_rounds: 50
+    random_state: 42
+
+artifacts_dir: ml/artifacts
